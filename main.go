@@ -2,15 +2,20 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/huh"
 	"github.com/fatih/color"
 )
 
 func main() {
+	invertedSelection := flag.Bool("invert", false, "Invert selection (by default, all found directories are selected for deletion)")
+	flag.Parse()
+
 	color.Magenta("Version: 0.1.1\n")
 
 	color.Cyan("Searching for node_modules directories...")
@@ -25,51 +30,65 @@ func main() {
 	files = files.OrganizeByDependenciesNum()
 
 	var totalSize int64
+	options := []huh.Option[string]{}
+
 	for i := range files {
 		dirSize, err := files[i].GetDirSizeMB()
 		if err != nil {
 			color.Red("Error getting size for %s: %v\n", files[i].FullPath, err)
 		}
-		totalSize += dirSize
-		color.Magenta("Path: %s\n", files[i].FullPath)
-		color.Magenta("├── Size: %dMB\n", dirSize)
-		color.Magenta("└── Total Dependencies: %d\n", files[i].Dependencies+files[i].DevDependencies)
-	}
 
-	color.Cyan("\nFound %d node_modules directories consuming a total of %dMB\n", len(files), totalSize)
+		label := fmt.Sprintf("%s (%dMB, %d dependencies)", files[i].FullPath, dirSize, files[i].Dependencies+files[i].DevDependencies)
+		options = append(options, huh.NewOption(label, files[i].FullPath).Selected(!*invertedSelection))
+
+		totalSize += dirSize
+	}
 
 	if len(files) == 0 {
 		color.Green("No node_modules directories found.")
 		return
 	}
 
-	if askToRemove() {
-		var totalSpaceSaved int64
-		for _, file := range files {
-			spaceSaved := file.SizeMB
-			totalSpaceSaved += spaceSaved
+	color.Cyan("\nFound %d node_modules directories consuming a total of %dMB\n", len(files), totalSize)
 
-			err = os.RemoveAll(file.FullPath)
-			if err != nil {
-				color.Red("Error removing %s: %v\n", file.FullPath, err)
-			} else {
-				color.Green("Successfully removed %s, freed %dMB\n", file.FullPath, spaceSaved)
+	var selected []string
+	multiSelect := huh.NewMultiSelect[string]().
+		Options(options...).
+		Title("Select node_modules directories to remove:").
+		Value(&selected)
+	if err := multiSelect.Run(); err != nil {
+		fmt.Println("Error during selection:", err)
+		return
+	}
+
+	if len(selected) == 0 {
+		color.Yellow("No directories selected for removal. Exiting.")
+		return
+	}
+
+	var filesToRemove FoundNodeModules
+	for _, sel := range selected {
+		for _, file := range files {
+			if file.FullPath == sel {
+				filesToRemove = append(filesToRemove, file)
+				break
 			}
 		}
-		color.Green("\nTotal space freed: %dMB\n", totalSpaceSaved)
-	} else {
-		color.Yellow("No directories were removed.")
 	}
-}
 
-func askToRemove() bool {
-	var response string
-	fmt.Print("\nDo you want to remove these node_modules directories? (y/N): ")
-	_, err := fmt.Scanln(&response)
-	if err != nil {
-		return false
+	var totalSpaceSaved int64
+	for _, file := range filesToRemove {
+		spaceSaved := file.SizeMB
+		totalSpaceSaved += spaceSaved
+
+		err = os.RemoveAll(file.FullPath)
+		if err != nil {
+			color.Red("Error removing %s: %v\n", file.FullPath, err)
+		} else {
+			color.Green("Successfully removed %s, freed %dMB\n", file.FullPath, spaceSaved)
+		}
 	}
-	return response == "y" || response == "Y"
+	color.Green("\nTotal space freed: %dMB\n", totalSpaceSaved)
 }
 
 func findFiles(cwd string) FoundNodeModules {
