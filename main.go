@@ -50,6 +50,13 @@ func main() {
 		totalSize += dirSize
 	}
 
+	defer func() {
+		err = runYarnCacheClean()
+		if err != nil {
+			color.Red("Error running 'yarn cache clean --all': %v", err)
+		}
+	}()
+
 	if len(files) == 0 {
 		color.Green("No node_modules directories found.")
 		return
@@ -103,11 +110,6 @@ func main() {
 		})
 	}
 	wg.Wait()
-
-	err = runYarnCacheClean()
-	if err != nil {
-		color.Red("Error during yarn cache clean: %v\n", err)
-	}
 
 	color.Green("\nTotal space freed: %dMB\n", totalSpaceSaved)
 }
@@ -180,22 +182,26 @@ func processPackageJson(path string) (*FoundNodeModule, error) {
 func runYarnCacheClean() error {
 	// Ask user for confirmation
 	var response string
-	fmt.Print("Do you want to run 'yarn cache clean' to free up additional space? (y/N): ")
+	fmt.Print("\nDo you want to run 'yarn cache clean --all' to free up additional space? (y/N): ")
 	_, err := fmt.Scanln(&response)
 	if err != nil {
+		if err.Error() == "unexpected newline" {
+			color.Yellow("Skipping 'yarn cache clean --all'.")
+			return nil
+		}
 		return err
 	}
 	if response == "y" || response == "Y" || response == "yes" || response == "YES" {
-		color.Cyan("Running 'yarn cache clean'...")
+		color.Cyan("Running 'yarn cache clean --all'...")
 		cmd := exec.Command("yarn", "cache", "clean", "--all")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("error running 'yarn cache clean': %v", err)
+			return fmt.Errorf("error running 'yarn cache clean --all': %v", err)
 		}
-		color.Green("'yarn cache clean' completed successfully.")
+		color.Green("'yarn cache clean --all' completed successfully.")
 	} else {
-		color.Yellow("Skipping 'yarn cache clean'.")
+		color.Yellow("Skipping 'yarn cache clean --all'.")
 	}
 	return nil
 }
