@@ -85,13 +85,12 @@ func main() {
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, 5) // Limit to 5 concurrent deletions
 	for _, file := range filesToRemove {
-		wg.Add(1)
-		spaceSaved := file.SizeMB
-		totalSpaceSaved += spaceSaved
 		semaphore <- struct{}{}
 
-		go func() {
-			defer wg.Done()
+		spaceSaved := file.SizeMB
+		totalSpaceSaved += spaceSaved
+
+		wg.Go(func() {
 			defer func() { <-semaphore }()
 
 			err = os.RemoveAll(file.FullPath)
@@ -100,7 +99,7 @@ func main() {
 			} else {
 				color.Green("Successfully removed %s, freed %dMB\n", file.FullPath, spaceSaved)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
