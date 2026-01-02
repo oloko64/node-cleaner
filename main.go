@@ -30,8 +30,7 @@ func main() {
 
 	files, err := findInParallel(cwd)
 	if err != nil {
-		fmt.Println("Error finding files:", err)
-		return
+		color.Red("Error finding files: %v", err)
 	}
 	files = files.OrganizeByDependenciesNum()
 
