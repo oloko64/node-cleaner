@@ -88,6 +88,7 @@ func main() {
 		wg.Add(1)
 		spaceSaved := file.SizeMB
 		totalSpaceSaved += spaceSaved
+		semaphore <- struct{}{}
 
 		go func() {
 			defer wg.Done()
