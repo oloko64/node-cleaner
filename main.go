@@ -17,7 +17,7 @@ func main() {
 	invertedSelection := flag.Bool("invert", false, "Invert selection (by default, all found directories are selected for deletion)")
 	flag.Parse()
 
-	color.Magenta("Version: 0.1.1\n")
+	color.Magenta("Version: 0.1.110\n")
 
 	color.Cyan("Searching for node_modules directories...")
 	color.Cyan("This may take a while depending on the size of the recursion.\n\n")
@@ -27,7 +27,11 @@ func main() {
 		return
 	}
 
-	files := findFiles(cwd)
+	files, err := findInParallel(cwd)
+	if err != nil {
+		fmt.Println("Error finding files:", err)
+		return
+	}
 	files = files.OrganizeByDependenciesNum()
 
 	var totalSize int64
@@ -102,52 +106,67 @@ func main() {
 	color.Green("\nTotal space freed: %dMB\n", totalSpaceSaved)
 }
 
-func findFiles(cwd string) FoundNodeModules {
-	// The code needs to recursive search for files in the given directory (cwd)
-	// and return a slice of FoundFile structs representing each found file.
-	// The pattern is to find all folders called "node_modules" only if in the same directory there is a "package.json" file.
+func findInParallel(cwd string) (FoundNodeModules, error) {
 	var files FoundNodeModules
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	jobs := make(chan string, 100)
+
+	for range 10 {
+		wg.Go(func() {
+			for path := range jobs {
+				foundFile, err := processPackageJson(path)
+				if err != nil {
+					color.Yellow("%v", err)
+					continue
+				}
+				mu.Lock()
+				files = append(files, *foundFile)
+				mu.Unlock()
+			}
+		})
+	}
 
 	err := filepath.WalkDir(cwd, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
 		if d.IsDir() && d.Name() == "node_modules" {
-			packageJsonPath := filepath.Join(filepath.Dir(path), "package.json")
-			if _, err := os.Stat(packageJsonPath); err == nil {
-				content, err := os.Open(packageJsonPath)
-				if err != nil {
-					return err
-				}
-				defer content.Close()
-
-				var depCount int
-				var devDepCount int
-				var pkg PackageJson
-				err = json.NewDecoder(content).Decode(&pkg)
-				if err != nil {
-					return err
-				}
-
-				depCount += len(pkg.Dependencies)
-				devDepCount += len(pkg.DevDependencies)
-
-				files = append(files, FoundNodeModule{
-					FullPath:        path,
-					Name:            d.Name(),
-					Dependencies:    depCount,
-					DevDependencies: devDepCount,
-				})
-			}
-
+			jobs <- path
 			return filepath.SkipDir
 		}
 		return nil
 	})
+
+	close(jobs)
+	wg.Wait()
+
+	return files, err
+
+}
+
+func processPackageJson(path string) (*FoundNodeModule, error) {
+	packageJsonPath := filepath.Join(filepath.Dir(path), "package.json")
+	content, err := os.Open(packageJsonPath)
 	if err != nil {
-		fmt.Println("Error:", err)
+		isNotExist := os.IsNotExist(err)
+		if isNotExist {
+			return nil, fmt.Errorf("package.json not found in path: %s", packageJsonPath)
+		}
+		return nil, err
+	}
+	defer content.Close()
+
+	var pkg PackageJson
+	if err := json.NewDecoder(content).Decode(&pkg); err != nil {
+		return nil, err
 	}
 
-	return files
+	return &FoundNodeModule{
+		FullPath:        path,
+		Name:            "node_modules",
+		Dependencies:    len(pkg.Dependencies),
+		DevDependencies: len(pkg.DevDependencies),
+	}, nil
 }
