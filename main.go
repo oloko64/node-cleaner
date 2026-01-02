@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/charmbracelet/huh"
 	"github.com/fatih/color"
@@ -77,17 +78,27 @@ func main() {
 	}
 
 	var totalSpaceSaved int64
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, 5) // Limit to 5 concurrent deletions
 	for _, file := range filesToRemove {
+		wg.Add(1)
 		spaceSaved := file.SizeMB
 		totalSpaceSaved += spaceSaved
 
-		err = os.RemoveAll(file.FullPath)
-		if err != nil {
-			color.Red("Error removing %s: %v\n", file.FullPath, err)
-		} else {
-			color.Green("Successfully removed %s, freed %dMB\n", file.FullPath, spaceSaved)
-		}
+		go func() {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+
+			err = os.RemoveAll(file.FullPath)
+			if err != nil {
+				color.Red("Error removing %s: %v\n", file.FullPath, err)
+			} else {
+				color.Green("Successfully removed %s, freed %dMB\n", file.FullPath, spaceSaved)
+			}
+		}()
 	}
+	wg.Wait()
+
 	color.Green("\nTotal space freed: %dMB\n", totalSpaceSaved)
 }
 
