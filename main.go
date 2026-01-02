@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 
@@ -103,6 +104,11 @@ func main() {
 	}
 	wg.Wait()
 
+	err = runYarnCacheClean()
+	if err != nil {
+		color.Red("Error during yarn cache clean: %v\n", err)
+	}
+
 	color.Green("\nTotal space freed: %dMB\n", totalSpaceSaved)
 }
 
@@ -169,4 +175,27 @@ func processPackageJson(path string) (*FoundNodeModule, error) {
 		Dependencies:    len(pkg.Dependencies),
 		DevDependencies: len(pkg.DevDependencies),
 	}, nil
+}
+
+func runYarnCacheClean() error {
+	// Ask user for confirmation
+	var response string
+	fmt.Print("Do you want to run 'yarn cache clean' to free up additional space? (y/N): ")
+	_, err := fmt.Scanln(&response)
+	if err != nil {
+		return err
+	}
+	if response == "y" || response == "Y" || response == "yes" || response == "YES" {
+		color.Cyan("Running 'yarn cache clean'...")
+		cmd := exec.Command("yarn", "cache", "clean", "--all")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("error running 'yarn cache clean': %v", err)
+		}
+		color.Green("'yarn cache clean' completed successfully.")
+	} else {
+		color.Yellow("Skipping 'yarn cache clean'.")
+	}
+	return nil
 }
