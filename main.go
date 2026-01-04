@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/fatih/color"
@@ -114,6 +115,8 @@ func main() {
 }
 
 func findInParallel(cwd string) (FoundNodeModules, error) {
+	begin := time.Now()
+
 	var files FoundNodeModules
 	var wg sync.WaitGroup
 
@@ -139,7 +142,17 @@ func findInParallel(cwd string) (FoundNodeModules, error) {
 		}
 	}()
 
+	var dirsScanned int64
+	var sumDirsChan = make(chan struct{}, 200)
+	go func() {
+		for range sumDirsChan {
+			dirsScanned++
+		}
+	}()
+
 	err := filepath.WalkDir(cwd, func(path string, d fs.DirEntry, err error) error {
+		sumDirsChan <- struct{}{}
+
 		if err != nil {
 			return err
 		}
@@ -153,6 +166,11 @@ func findInParallel(cwd string) (FoundNodeModules, error) {
 	close(jobs)
 	wg.Wait()
 	close(filesJobs)
+	close(sumDirsChan)
+
+	elapsed := time.Since(begin)
+	millis := elapsed.Milliseconds()
+	color.Cyan("\nScanned %d directories in %dms\n", dirsScanned, millis)
 
 	return files, err
 
