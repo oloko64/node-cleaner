@@ -18,7 +18,7 @@ func main() {
 	invertedSelection := flag.Bool("invert", false, "Invert selection (by default, all found directories are selected for deletion)")
 	flag.Parse()
 
-	color.Magenta("Version: 0.1.110\n")
+	color.Magenta("Version: 0.1.120\n")
 
 	color.Cyan("Searching for node_modules directories...")
 	color.Cyan("This may take a while depending on the size of the recursion.\n\n")
@@ -115,10 +115,10 @@ func main() {
 
 func findInParallel(cwd string) (FoundNodeModules, error) {
 	var files FoundNodeModules
-	var mu sync.Mutex
 	var wg sync.WaitGroup
 
 	jobs := make(chan string, 100)
+	filesJobs := make(chan *FoundNodeModule, 100)
 
 	for range 10 {
 		wg.Go(func() {
@@ -128,12 +128,16 @@ func findInParallel(cwd string) (FoundNodeModules, error) {
 					color.Yellow("%v", err)
 					continue
 				}
-				mu.Lock()
-				files = append(files, *foundFile)
-				mu.Unlock()
+				filesJobs <- foundFile
 			}
 		})
 	}
+
+	go func() {
+		for file := range filesJobs {
+			files = append(files, *file)
+		}
+	}()
 
 	err := filepath.WalkDir(cwd, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -148,6 +152,7 @@ func findInParallel(cwd string) (FoundNodeModules, error) {
 
 	close(jobs)
 	wg.Wait()
+	close(filesJobs)
 
 	return files, err
 
