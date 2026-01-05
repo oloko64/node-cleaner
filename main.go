@@ -169,11 +169,23 @@ func findInParallel(cwd string) (FoundNodeModules, error) {
 	close(sumDirsChan)
 
 	elapsed := time.Since(begin)
-	millis := elapsed.Milliseconds()
-	color.Cyan("\nScanned %d directories in %dms\n", dirsScanned, millis)
+	color.Cyan("\nScanned %d directories in %s\n", dirsScanned, toHumanTime(elapsed))
 
 	return files, err
 
+}
+
+func toHumanTime(d time.Duration) string {
+	// Convert duration to human-readable format 1000ms -> 1s, 60000ms -> 1m, etc.
+	if d.Hours() >= 1 {
+		return fmt.Sprintf("%.2fh", d.Hours())
+	} else if d.Minutes() >= 1 {
+		return fmt.Sprintf("%.2fm", d.Minutes())
+	} else if d.Seconds() >= 1 {
+		return fmt.Sprintf("%.2fs", d.Seconds())
+	} else {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
 }
 
 func processPackageJson(path string) (*FoundNodeModule, error) {
